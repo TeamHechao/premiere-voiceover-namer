@@ -14,6 +14,9 @@
   var Coordination = globalThis.VoiceoverNamerCoordination;
   var Recycle = globalThis.VoiceoverNamerRecycle;
   var RecycleHost = globalThis.VoiceoverNamerRecycleHost;
+  var MediaConflicts = globalThis.VoiceoverNamerMediaConflicts;
+  var MediaRename = globalThis.VoiceoverNamerMediaRename;
+  var MediaPanel = globalThis.VoiceoverNamerMediaPanel;
   var recycler = null;
 
   var POLL_INTERVAL_MS = 1200;
@@ -39,6 +42,7 @@
   var tickInFlight = false;
   var manualScanInFlight = false;
   var manualScanExecuting = false;
+  var mediaScanInFlight = false;
   var seenPaths = new Set();
   var pendingFiles = new Map();
   var watchedFolderBaseline = new Set();
@@ -193,7 +197,7 @@
       chooseFolderButton.title = sourceScope + sourceHint;
       chooseFolderButton.setAttribute("aria-label", "设置备用采集目录。" + sourceScope + sourceHint);
     }
-    setText("readinessCount", readiness.completed === 2 ? "自动待命" : readiness.completed + "/2 已完成");
+    setText("readinessCount", readiness.completed === 2 ? projectValue : readiness.completed + "/2 已完成");
   }
 
   function currentJobIsProcessing() {
@@ -272,30 +276,17 @@
     setText("previewTargetName", currentJob.targetName || "正在计算目标文件名…");
   }
 
-  function renderUsageGuide(view) {
-    var steps = [
-      ["guideProject", monitoring],
-      ["guideFolder", !!currentJob],
-      ["guideListen", currentJob && currentJob.stage === "complete"],
-    ];
-    steps.forEach(function (entry, index) {
-      var node = element(entry[0]);
-      if (!node) return;
-      var completed = entry[1] === true;
-      var active = !completed && ((index === 0 && !monitoring) || (index === 1 && monitoring) || (index === 2 && currentJobIsProcessing()));
-      node.setAttribute("data-guide-status", completed ? "done" : active ? "active" : "waiting");
-      node.setAttribute("aria-label", node.querySelector(".guide-title").textContent + "：" + (completed ? "已完成" : active ? "当前步骤" : "等待"));
-      var marker = node.querySelector(".guide-marker");
-      if (marker) marker.textContent = completed ? "✓" : String(index + 1);
-    });
+  function setDisclosure(buttonId, open) {
+    var button = element(buttonId);
+    var content = button && element(button.getAttribute("aria-controls"));
+    if (!content) return;
+    content.hidden = !open;
+    button.setAttribute("aria-expanded", open ? "true" : "false");
+  }
 
-    var status = "正在连接 Premiere";
-    if (view.mode === "ready" || view.mode === "starting") status = "正在自动布防";
-    if (view.mode === "listening") status = "直接点音轨麦克风";
-    if (view.mode === "paused") status = "恢复后继续自动处理";
-    if (["processing", "scanning"].indexOf(view.mode) >= 0) status = "录音已捕获，正在自动处理";
-    if (view.mode === "error") status = "看顶部提示后重新检查";
-    setText("guideStatus", status);
+  function onDisclosureClick(event) {
+    var button = event.currentTarget;
+    setDisclosure(button.id, button.getAttribute("aria-expanded") !== "true");
   }
 
   function deriveCurrentPanelState() {
@@ -315,12 +306,12 @@
 
   function renderPanelState(view) {
     var shell = element("panelMain");
+    var previousMode = shell && shell.getAttribute("data-panel-state");
     if (shell) {
       shell.setAttribute("data-panel-state", view.mode);
       shell.setAttribute("aria-busy", view.busy ? "true" : "false");
     }
     setStatus(view.tone, view.statusLabel);
-    setText("stateKicker", view.kicker);
     setText("stateTitle", view.title);
     setText("stateDescription", view.description);
     if (currentJob && currentJob.waitingForLock && !panelErrorMessage) {
@@ -328,9 +319,16 @@
       setText("stateDescription", "录音暂时被占用，释放后自动继续；可以继续录制。");
     }
     renderReadiness(view.readiness);
-    renderUsageGuide(view);
     renderPipeline();
     renderFilenamePreview();
+    if (view.mode !== previousMode) {
+      if (["disconnected", "unsaved", "no-sequence"].indexOf(view.mode) >= 0) setDisclosure("connectionDetailsButton", true);
+      if (view.mode === "error" && currentJob && currentJob.stage === "error") setDisclosure("recordingDetailsButton", true);
+    }
+    if (mediaScanInFlight) {
+      setText("stateTitle", "正在整理同名素材");
+      setText("stateDescription", "在预览窗口查看清单；关闭后继续自动处理录音。");
+    }
   }
 
   function setJobStage(stage, candidate, plan) {
@@ -388,9 +386,12 @@
       scanButton.disabled =
         view.busy || !context || !projectIsSaved() || !context.sequence || !projectState;
     }
+    var mediaButton = element("mediaButton");
+    if (mediaButton) mediaButton.disabled = view.busy || manualScanInFlight || !context || !projectIsSaved();
     if (chooseFolderButton) chooseFolderButton.disabled = monitoring || view.busy || !context || !projectIsSaved();
     if (refreshButton) {
-      refreshButton.textContent = monitoring ? "重新检查" : "刷新项目";
+      refreshButton.title = monitoring ? "重新检查" : "刷新项目";
+      refreshButton.setAttribute("aria-label", refreshButton.title);
       refreshButton.disabled = view.busy || (monitoring && !panelErrorMessage);
     }
 
@@ -791,6 +792,7 @@
   }
 
   function capturePathIsTrusted(nativePath) {
+    if (MediaConflicts.isRenamedName(nativePath)) return false;
     return MonitoringPolicy.isTrustedCapturePath({
       mediaPath: nativePath,
       learnedFolder: watchFolderValid && projectState ? projectState.watchFolder : "",
@@ -1904,6 +1906,74 @@
     }
   }
 
+  async function organizeDuplicateMedia() {
+    if (manualScanInFlight) return;
+    manualScanInFlight = true;
+    mediaScanInFlight = true;
+    var generation = lifecycleGuard.current();
+    var reportedPaths = new Set();
+    updateControls();
+    try {
+      await withOperationLock(async function () {
+        ensureLifecycle(generation);
+        var active = await getActiveContext();
+        if (!active || !active.project.path) throw new Error("请先打开并保存工程");
+        async function validate() {
+          ensureLifecycle(generation);
+          var project = await ppro.Project.getActiveProject();
+          if (!project || getProjectIdentity(project) !== active.identity) throw cancellationError("项目已切换，请重新扫描");
+        }
+        await MediaPanel.run({
+          document: document, fs: fs, project: active.project, ppro: ppro, storage: uxp.storage,
+          randomSource: globalThis, validate: validate, log: addLog,
+          protect: async function (path) {
+            var managed = Core.parseManagedName(path);
+            if (!managed || !managed.recordingId) return "";
+            var recordPath = Core.joinNativePath(active.statePath + ".recordings", managed.recordingId + ".json");
+            return await MediaConflicts.statOrNull(fs, recordPath) ? "该录音已登记自动回收，保留原命名与回收记录" : "";
+          },
+          move: function (source, target) { return MediaRename.moveExclusive(uxp.storage.localFileSystem, source, target); },
+          createJournalFolder: async function () {
+            var path = Core.joinNativePath(active.recordingFolderPath, "素材命名记录");
+            var parent = await FolderReadiness.ensure(fs, active.recordingFolderPath, uxp.storage.localFileSystem);
+            if (!parent.valid) throw new Error(parent.problem);
+            var inspection = await FolderReadiness.ensure(fs, path, uxp.storage.localFileSystem);
+            if (!inspection.valid) throw new Error(inspection.problem);
+            return await uxp.storage.localFileSystem.getEntryWithUrl(MediaRename.entryUrl(path));
+          },
+          onResult: function (result) {
+            if (reportedPaths.has(result.source)) {
+              if (result.journalWarning) addLog("warn", result.journalWarning);
+              return;
+            }
+            reportedPaths.add(result.source);
+            if (result.status === "completed") {
+              var key = Core.normalizePathForComparison(result.source);
+              pendingFiles.delete(key);
+              seenPaths.delete(key);
+              watchedFolderBaseline.delete(key);
+              unmatchedFolderFiles.delete(key);
+              sessionMetrics.processed += 1;
+              addLog("ok", "同名素材已整理：" + Core.fileNameFromPath(result.target));
+            } else if (result.status !== "completed") {
+              sessionMetrics.errors += 1;
+              addLog("error", "同名素材未完成：" + Core.fileNameFromPath(result.source) + "；" + result.message +
+                ((result.rollbackWarnings || []).length ? "；" + result.rollbackWarnings.join("；") : ""));
+            }
+            if (result.journalWarning) addLog("warn", result.journalWarning);
+          },
+        });
+      });
+    } catch (error) {
+      addLog("error", "同名素材整理：" + (error.message || error));
+    } finally {
+      manualScanInFlight = false;
+      mediaScanInFlight = false;
+      updateControls();
+      if (monitoring) requestSoonScan();
+    }
+  }
+
   async function saveSetting(name, value) {
     try {
       await withOperationLock(async function () {
@@ -1984,8 +2054,11 @@
     element("startButton").addEventListener("click", handlePrimaryAction);
     element("stopButton").addEventListener("click", onStopButtonClick);
     element("scanButton").addEventListener("click", scanMissedRecordings);
+    element("mediaButton").addEventListener("click", organizeDuplicateMedia);
     element("refreshButton").addEventListener("click", onRefreshButtonClick);
     element("clearLogButton").addEventListener("click", clearLog);
+    element("recordingDetailsButton").addEventListener("click", onDisclosureClick);
+    element("connectionDetailsButton").addEventListener("click", onDisclosureClick);
     element("cancelScanButton").addEventListener("click", onCancelScanClick);
     element("closeScanButton").addEventListener("click", onCancelScanClick);
     element("confirmScanButton").addEventListener("click", onConfirmScanClick);
@@ -2000,8 +2073,11 @@
       ["startButton", handlePrimaryAction],
       ["stopButton", onStopButtonClick],
       ["scanButton", scanMissedRecordings],
+      ["mediaButton", organizeDuplicateMedia],
       ["refreshButton", onRefreshButtonClick],
       ["clearLogButton", clearLog],
+      ["recordingDetailsButton", onDisclosureClick],
+      ["connectionDetailsButton", onDisclosureClick],
       ["cancelScanButton", onCancelScanClick],
       ["closeScanButton", onCancelScanClick],
       ["confirmScanButton", onConfirmScanClick],
@@ -2034,6 +2110,10 @@
           panelVisible = false;
           contextRefreshGeneration += 1;
           lifecycleGuard.bump();
+          try {
+            var mediaDialog = element("mediaDialog");
+            if (mediaDialog && mediaDialog.open) mediaDialog.close("cancel");
+          } catch (error) {}
           stopMonitoring();
           detachGlobalImportListener();
         },
@@ -2044,6 +2124,8 @@
           try {
             var dialog = element("scanDialog");
             if (dialog && dialog.open) dialog.close("cancel");
+            var mediaDialog = element("mediaDialog");
+            if (mediaDialog && mediaDialog.open) mediaDialog.close("cancel");
           } catch (error) {}
           stopMonitoring();
           detachGlobalImportListener();

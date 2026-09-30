@@ -10,9 +10,22 @@
     if (!Array.isArray(value)) throw new Error("回收检查未取得完整列表，保留录音");
     return value;
   }
-  async function identity(item) {
-    var id = String(await item.getId());
-    if (!id || id === "undefined" || id === "null") throw new Error("素材身份不可读，保留录音");
+  function itemLocation(item, location) {
+    var name = "";
+    try { name = String(item && item.name || "").slice(0, 100); } catch (error) {}
+    return (location || "工程素材") + (name ? "（" + name + "）" : "");
+  }
+  async function identity(item, location) {
+    function fail(reason) {
+      throw new Error("素材身份不可读，保留录音；位置：" + itemLocation(item, location) + "；原因：" + reason);
+    }
+    if (!item || typeof item.getId !== "function") fail("素材项未提供 getId 接口");
+    var id;
+    try { id = await item.getId(); }
+    catch (error) { fail("读取 ID 失败：" + String(error && error.message || error).slice(0, 240)); }
+    if (typeof id === "number" && Number.isSafeInteger(id) && id >= 0) id = String(id);
+    if (typeof id !== "string") fail("ID 返回类型为 " + (id === null ? "null" : typeof id));
+    if (!id.trim() || id === "undefined" || id === "null") fail("ID 为空或无效");
     return id;
   }
 
@@ -22,8 +35,9 @@
     var items = [];
     var visited = new Set();
     var folderIds = new Set();
+    var folderViews = new Set();
     async function clipFor(raw) {
-      var clip = ppro.ClipProjectItem.cast(raw);
+      var clip = await ppro.ClipProjectItem.cast(raw);
       if (!clip) throw new Error("无法读取素材类型，保留录音");
       return clip;
     }
@@ -49,7 +63,7 @@
           var clips = list(await track.getTrackItems(ppro.Constants.TrackItemType.CLIP, false));
           for (var trackItem of clips) {
             var raw = await trackItem.getProjectItem();
-            ids.add(await identity(raw));
+            ids.add(await identity(raw, "序列 " + key + " / " + (kind === "Audio" ? "音轨 " : "视频轨 ") + (n + 1)));
             var clip = await clipFor(raw);
             if (await clip.isSequence()) {
               await sequence(await clip.getSequence());
@@ -61,19 +75,30 @@
         }
       }
     }
-    async function folder(parent) {
-      var key = await identity(parent);
-      if (folderIds.has(key)) throw new Error("项目文件夹结构重复，保留录音");
-      folderIds.add(key);
-      for (var raw of list(await parent.getItems())) {
+    async function folder(parent, rawItem, location) {
+      await validate();
+      location = location || "工程根素材箱";
+      if (!parent || typeof parent.getItems !== "function") throw new Error("无法读取素材箱内容，保留录音；位置：" + location);
+      if (folderViews.has(parent)) throw new Error("项目文件夹结构重复，保留录音；位置：" + location);
+      folderViews.add(parent);
+      if (rawItem) {
+        var key = await identity(rawItem, location);
+        if (folderIds.has(key)) throw new Error("项目文件夹结构重复，保留录音；位置：" + location);
+        folderIds.add(key);
+        location = itemLocation(rawItem, location);
+      }
+      var children = list(await parent.getItems());
+      for (var index = 0; index < children.length; index += 1) {
+        var raw = children[index], childLocation = location + " / 第 " + (index + 1) + " 项";
         var child = null;
-        try { child = ppro.FolderItem.cast(raw); } catch (castError) { /* A media item is not a folder. */ }
+        try { child = await ppro.FolderItem.cast(raw); } catch (castError) { /* A media item is not a folder. */ }
         if (child) {
-          await folder(child);
+          await folder(child, raw, childLocation);
         } else {
+          var id = await identity(raw, childLocation);
           var clip = await clipFor(raw);
           if (await clip.isSequence()) await sequence(await clip.getSequence());
-          else items.push({ id: await identity(raw), path: await mediaPath(clip), raw: raw, parent: parent });
+          else items.push({ id: id, path: await mediaPath(clip), raw: raw, parent: parent });
         }
       }
       await validate();

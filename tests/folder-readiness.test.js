@@ -84,7 +84,7 @@ test('fs remains a fallback when UXP entry creation is unavailable', async () =>
 test('production wires native entry storage into every directory creation', () => {
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/main.js'), 'utf8');
   const calls = source.match(/FolderReadiness\.ensure\([^;\n]+/g);
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 5);
   assert.ok(calls.every(call => call.includes('uxp.storage.localFileSystem')));
 });
 

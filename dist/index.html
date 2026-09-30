@@ -10,13 +10,12 @@
   <body>
     <main id="panelMain" class="app-shell" data-panel-state="loading" aria-busy="true">
       <header class="product-bar">
-        <div class="product-mark" aria-hidden="true">
-          <span></span><span></span><span></span><span></span><span></span>
-        </div>
+        <img class="product-mark" src="icons/dark.svg" alt="" />
         <div class="product-copy">
           <h1>赫朝录音命名器</h1>
-          <div class="version">0.4.4</div>
+          <div class="version">0.5.7</div>
         </div>
+        <button id="refreshButton" class="icon-action" type="button" disabled aria-label="刷新项目" title="刷新项目"><img src="icons/refresh-cw.svg" alt="" /></button>
         <div id="monitorStatus" class="monitor-status monitor-status--busy" role="status" aria-live="polite">
           <span class="status-light" aria-hidden="true"></span>
           <span id="monitorStatusText">连接中</span>
@@ -25,28 +24,35 @@
 
       <section class="state-band" aria-labelledby="stateTitle">
         <div class="state-heading">
-          <div class="state-symbol" aria-hidden="true"><span></span><span></span><span></span></div>
           <div class="state-copy">
-            <div id="stateKicker" class="state-kicker">正在读取 Premiere</div>
             <h2 id="stateTitle">检查当前工程</h2>
+          </div>
+          <div class="primary-actions">
+            <button id="startButton" class="button button--primary" type="button" disabled>正在检查</button>
+            <button id="stopButton" class="button button--quiet" type="button" hidden title="暂停自动命名">暂停</button>
           </div>
         </div>
         <p id="stateDescription" class="state-description">正在核对工程、活动序列和最终保存目录。</p>
-        <div class="primary-actions">
-          <button id="startButton" class="button button--primary" type="button" disabled>正在检查</button>
-          <button id="stopButton" class="button button--secondary" type="button" hidden>暂停自动命名</button>
-        </div>
-        <div class="secondary-actions" aria-label="辅助操作">
-          <button id="scanButton" class="button button--secondary" type="button" disabled>扫描遗漏</button>
-          <button id="refreshButton" class="button button--quiet" type="button" disabled>刷新项目</button>
-        </div>
+      </section>
+
+      <section class="command-bar" aria-label="素材整理">
+        <button id="scanButton" class="button button--secondary" type="button" disabled>扫描遗漏录音</button>
+        <button id="mediaButton" class="button button--secondary" type="button" disabled>整理同名素材</button>
+      </section>
+
+      <section class="metrics" aria-label="本次运行统计">
+        <div class="metric"><span class="metric-label">完成</span><span id="processedCount" class="metric-value">0</span></div>
+        <div class="metric"><span class="metric-label">等待</span><span id="pendingCount" class="metric-value">0</span></div>
+        <div class="metric"><span class="metric-label">异常</span><span id="errorCount" class="metric-value">0</span></div>
       </section>
 
       <section class="pipeline-band" aria-labelledby="pipelineTitle">
-        <div class="section-head">
-          <h2 id="pipelineTitle">录音处理</h2>
+        <button id="recordingDetailsButton" class="section-head disclosure-toggle" type="button" aria-controls="recordingDetails" aria-expanded="false">
+          <img class="disclosure-icon" src="icons/chevron-right.svg" alt="" />
+          <span id="pipelineTitle" class="section-title">录音详情</span>
           <span id="pipelineSummary" class="section-summary" aria-live="polite">等待自动布防</span>
-        </div>
+        </button>
+        <div id="recordingDetails" class="section-content" hidden>
         <ol id="pipelineList" class="pipeline-list" aria-label="录音处理进度">
           <li id="pipelineFound" class="pipeline-step pipeline-step--waiting">
             <span class="pipeline-marker" aria-hidden="true">1</span><span class="pipeline-label">发现 WAV</span>
@@ -75,67 +81,30 @@
             <span class="filename-label">整理后</span><code id="previewTargetName">318最终版-7f3c9a2e4b1d48f0a6c1e8d2b9f04a77.wav</code>
           </div>
         </div>
-      </section>
-
-      <section class="guide-band" aria-labelledby="guideTitle">
-        <div class="section-head guide-head">
-          <h2 id="guideTitle">现在怎么用</h2>
-          <span id="guideStatus" class="section-summary">正在连接 Premiere</span>
-        </div>
-        <ol class="guide-steps" aria-label="原生录音操作流程">
-          <li id="guideProject" class="guide-step" data-guide-status="waiting">
-            <span class="guide-marker" aria-hidden="true">1</span>
-            <span class="guide-copy">
-              <span class="guide-title">面板自动待命</span>
-              <span class="guide-detail">不选目录，也不用点开始监听</span>
-            </span>
-          </li>
-          <li id="guideFolder" class="guide-step" data-guide-status="waiting">
-            <span class="guide-marker" aria-hidden="true">2</span>
-            <span class="guide-copy">
-              <span class="guide-title">点击时间线音轨麦克风</span>
-              <span class="guide-detail">就是 Premiere 自带的“画外音录制”</span>
-            </span>
-          </li>
-          <li id="guideListen" class="guide-step" data-guide-status="waiting">
-            <span class="guide-marker" aria-hidden="true">3</span>
-            <span class="guide-copy">
-              <span class="guide-title">停止录音后自动整理</span>
-              <span class="guide-detail">最终保存到 .prproj 同级的 Adobe Premiere Pro Captured and Generated 文件夹，并更新名称和链接</span>
-            </span>
-          </li>
-        </ol>
-        <div class="guide-route" aria-label="自动处理路径">
-          <div class="guide-route-node"><span class="guide-route-badge">REC</span><span>原生录音</span></div>
-          <span class="guide-route-line" aria-hidden="true"></span>
-          <div class="guide-route-node"><span class="guide-route-badge guide-route-badge--accent">UUID</span><span>唯一文件名</span></div>
-          <span class="guide-route-line" aria-hidden="true"></span>
-          <div class="guide-route-node"><span class="guide-route-badge">LINK</span><span>自动重链接</span></div>
         </div>
       </section>
 
       <section class="readiness-band" aria-labelledby="readinessTitle">
-        <div class="section-head">
-          <h2 id="readinessTitle">当前连接</h2>
+        <button id="connectionDetailsButton" class="section-head disclosure-toggle" type="button" aria-controls="connectionDetails" aria-expanded="false">
+          <img class="disclosure-icon" src="icons/chevron-right.svg" alt="" />
+          <span id="readinessTitle" class="section-title">工程与目录</span>
           <span id="readinessCount" class="section-summary">0/2 已完成</span>
-        </div>
+        </button>
+        <div id="connectionDetails" class="section-content" hidden>
         <ol class="readiness-list">
           <li id="readinessProject" class="readiness-item" data-ready="false">
-            <span class="readiness-marker" data-step="1" aria-hidden="true"></span>
             <span class="readiness-copy">
               <span class="readiness-name">工程已保存</span>
               <span id="projectName" class="readiness-value">正在读取</span>
             </span>
           </li>
           <li id="readinessSequence" class="readiness-item" data-ready="false">
-            <span class="readiness-marker" data-step="2" aria-hidden="true"></span>
             <span class="readiness-copy">
               <span class="readiness-name">活动序列</span>
               <span id="sequenceName" class="readiness-value">正在读取</span>
             </span>
           </li>
           <li id="readinessFolder" class="readiness-item readiness-item--optional" data-ready="false">
-            <span class="readiness-marker readiness-marker--location" aria-hidden="true">P</span>
             <span class="readiness-copy">
               <span class="readiness-name">最终保存位置</span>
               <span id="watchFolder" class="readiness-value readiness-value--path">保存工程后自动确定</span>
@@ -143,20 +112,15 @@
             <button id="chooseFolderButton" class="button button--compact button--quiet" type="button" disabled title="只用于发现 Premiere 原始录音，不会改变最终保存位置">备用源</button>
           </li>
         </ol>
-      </section>
-
-      <section class="metrics" aria-label="本次运行统计">
-        <div class="metric"><span id="processedCount" class="metric-value">0</span><span class="metric-label">已完成</span></div>
-        <div class="metric"><span id="pendingCount" class="metric-value">0</span><span class="metric-label">等待中</span></div>
-        <div class="metric"><span id="errorCount" class="metric-value">0</span><span class="metric-label">异常</span></div>
+        </div>
       </section>
 
       <section class="activity" aria-labelledby="activityTitle">
         <div class="activity-head">
           <h2 id="activityTitle">最近活动</h2>
-          <button id="clearLogButton" class="text-action" type="button">清空</button>
+          <button id="clearLogButton" class="icon-action" type="button" aria-label="清空活动记录" title="清空活动记录"><img src="icons/trash-2.svg" alt="" /></button>
         </div>
-        <ol id="activityLog" class="activity-list" aria-live="polite" aria-relevant="additions">
+        <ol id="activityLog" class="activity-list" tabindex="0" aria-label="最近活动记录" aria-live="polite" aria-relevant="additions">
           <li class="activity-empty">等待第一条录音</li>
         </ol>
       </section>
@@ -172,10 +136,29 @@
           <button id="closeScanButton" class="icon-action" type="button" aria-label="关闭扫描预览" title="关闭">×</button>
         </header>
         <div id="scanPreview" class="scan-preview"></div>
-        <div id="scanDialogDescription" class="dialog-alert">将把录音移到工程文件旁的 Adobe Premiere Pro Captured and Generated 文件夹，并更新媒体路径、素材名和片段名。跨盘时会先复制并校验，链接成功后再删除原文件；删除失败会保留原文件并提示。</div>
+        <div id="scanDialogDescription" class="dialog-alert" tabindex="0">将把录音移到工程文件旁的 Adobe Premiere Pro Captured and Generated 文件夹，并更新媒体路径、素材名和片段名。跨盘时会先复制并校验，链接成功后再删除原文件；删除失败会保留原文件并提示。</div>
         <footer class="dialog-actions">
           <button id="cancelScanButton" class="button button--quiet" type="button">取消</button>
           <button id="confirmScanButton" class="button button--primary" type="button">确认处理</button>
+        </footer>
+      </div>
+    </dialog>
+
+    <dialog id="mediaDialog" class="scan-dialog" aria-labelledby="mediaDialogTitle" aria-describedby="mediaDialogDescription">
+      <div class="dialog-shell">
+        <header class="dialog-head">
+          <div>
+            <h2 id="mediaDialogTitle">整理同名素材</h2>
+            <span id="mediaDialogCount" class="dialog-count" role="status" aria-live="polite"></span>
+          </div>
+          <button id="closeMediaButton" class="icon-action" type="button" aria-label="关闭同名素材窗口">×</button>
+        </header>
+        <p id="mediaScope" class="media-scope"></p>
+        <div id="mediaPreview" class="scan-preview" tabindex="0" aria-label="改名预览与结果"></div>
+        <div id="mediaDialogDescription" class="dialog-alert" tabindex="0">只整理项目面板及子素材箱。文件留在原目录，加唯一 ID 并更新素材名和链接；时间线片段名称不逐条改写。其他工程共用的文件需重新链接。普通素材不自动回收。全部完成并确认媒体在线后，再保存工程；恢复异常时先处理提示。Premiere 撤销不能恢复磁盘原名。</div>
+        <footer class="dialog-actions">
+          <button id="cancelMediaButton" class="button button--quiet" type="button">关闭</button>
+          <button id="confirmMediaButton" class="button button--primary" type="button" hidden>确认改名</button>
         </footer>
       </div>
     </dialog>
@@ -193,6 +176,9 @@
     <script src="src/recycle-policy.js"></script>
     <script src="src/recycle-host.js"></script>
     <script src="src/recycle.js"></script>
+    <script src="src/media-conflicts.js"></script>
+    <script src="src/media-rename.js"></script>
+    <script src="src/media-panel.js"></script>
     <script src="src/main.js"></script>
   </body>
 </html>

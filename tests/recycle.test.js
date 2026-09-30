@@ -209,20 +209,96 @@ test('registry does not use the 200-entry history as ownership evidence', async 
 });
 
 function hostHarness() {
-  const clip = { getId: async () => 'clip', isSequence: async () => false, getMediaFilePath: async () => target };
-  const track = { getTrackItems: async () => [{ getProjectItem: async () => clip }] };
+  const views = require('./helpers/premiere-item-views.js').createItemViews();
+  const clip = views.register({ isSequence: async () => false, getMediaFilePath: async () => target }, 'clip');
+  const track = { getTrackItems: async () => [{ getProjectItem: async () => views.base(clip) }] };
   const seq = { guid: 'seq', getAudioTrackCount: async () => 1, getVideoTrackCount: async () => 0, getAudioTrack: async () => track };
-  const root = { getId: async () => 'root', getItems: async () => [clip] };
+  const root = views.register({ getItems: async () => [views.base(clip)] }, 'root');
   const project = { getSequences: async () => [seq], getRootItem: async () => root };
-  const ppro = { Constants: { TrackItemType: { CLIP: 1 } }, ClipProjectItem: { cast: item => item }, FolderItem: { cast: item => item.getItems ? item : null } };
-  return { project, ppro, clip, seq, track, root };
+  return { project, ppro: views.ppro, clip, seq, track, root, views };
 }
+
+test('recycle scan handles distinct root, nested folder and media wrappers', async () => {
+  const h = hostHarness();
+  const bin = h.views.register({ getItems: async () => [h.views.base(h.clip)] }, 'bin');
+  h.root.getItems = async () => [h.views.base(bin)];
+  assert.equal(typeof h.root.getId, 'undefined');
+  assert.equal(typeof bin.getId, 'undefined');
+  assert.equal(typeof h.clip.getId, 'undefined');
+  const result = await Host.snapshot(h.project, h.ppro, normalize, async () => {});
+  assert.equal(result.complete, true);
+  assert.equal(result.paths.has(normalize(target)), true);
+  assert.equal(result.ids.has('clip'), true);
+  assert.equal(result.items[0].id, 'clip');
+  assert.equal(result.items[0].raw, h.views.base(h.clip));
+  assert.equal(result.items[0].parent, bin);
+});
+test('recycle traversal does not require a ProjectItem identity for the root container', async () => {
+  for (const ProjectItem of [undefined, {}, { cast: () => null }, { cast: () => ({}) },
+    { cast: () => { throw new Error('unsupported wrapper'); } }]) {
+    const h = hostHarness();
+    const bin = h.views.register({ getItems: async () => [h.views.base(h.clip)] }, 'bin');
+    h.project.getRootItem = async () => ({ getItems: async () => [h.views.base(bin)] });
+    h.ppro.ProjectItem = ProjectItem;
+    const result = await Host.snapshot(h.project, h.ppro, normalize, async () => {});
+    assert.equal(result.complete, true);
+    assert.equal(result.ids.has('clip'), true);
+    assert.equal(result.items[0].id, 'clip');
+  }
+});
+test('unreadable child bin identity prevents recycling and identifies the bin', async () => {
+  for (const getId of [undefined, () => '', () => { throw new Error('host busy'); }]) {
+    const h = hostHarness();
+    let reads = 0;
+    const bin = h.views.register({ name: '旧录音', getItems: async () => { reads++; return []; } }, 'bin');
+    h.views.base(bin).getId = getId;
+    h.root.getItems = async () => [h.views.base(bin)];
+    await assert.rejects(Host.snapshot(h.project, h.ppro, normalize, async () => {}), error => {
+      assert.match(error.message, /素材身份不可读/);
+      assert.match(error.message, /旧录音/);
+      assert.match(error.message, /原因/);
+      return true;
+    });
+    assert.equal(reads, 0);
+  }
+});
+test('recycle scan preserves used references with safe numeric IDs', async () => {
+  const h = hostHarness();
+  h.views.base(h.clip).getId = () => 0;
+  const result = await Host.snapshot(h.project, h.ppro, normalize, async () => {});
+  assert.equal(result.ids.has('0'), true);
+  assert.equal(result.items[0].id, '0');
+  assert.equal(result.paths.has(normalize(target)), true);
+});
+test('invalid media identity cannot establish zero references for recycling', async () => {
+  for (const id of [undefined, null, '', '   ', 'undefined', 'null', {}, NaN, Infinity, -1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const h = hostHarness();
+    h.views.base(h.clip).getId = () => id;
+    await assert.rejects(Host.snapshot(h.project, h.ppro, normalize, async () => {}), /素材身份不可读/);
+  }
+});
+test('duplicate bin identities and root cycles cannot produce a complete recycle scan', async () => {
+  const h = hostHarness();
+  const bin = h.views.register({ getItems: async () => [] }, 'bin');
+  h.root.getItems = async () => [h.views.base(bin), h.views.base(bin)];
+  await assert.rejects(Host.snapshot(h.project, h.ppro, normalize, async () => {}), /结构重复/);
+  h.root.getItems = async () => [h.views.base(h.root)];
+  await assert.rejects(Host.snapshot(h.project, h.ppro, normalize, async () => {}), /结构重复/);
+});
+
+test('recycle traversal accepts asynchronous folder and clip casts', async () => {
+  const h = hostHarness();
+  const folderCast = h.ppro.FolderItem.cast, clipCast = h.ppro.ClipProjectItem.cast;
+  h.ppro.FolderItem = { cast: async raw => folderCast(raw) };
+  h.ppro.ClipProjectItem = { cast: async raw => clipCast(raw) };
+  assert.equal((await Host.snapshot(h.project, h.ppro, normalize, async () => {})).ids.has('clip'), true);
+});
 test('full-project scan follows nested sequences from project items and deduplicates cycles', async () => {
   const h = hostHarness();
   const nested = { ...h.seq, guid: 'nested' };
-  const nestedItem = { getId: async () => 'nested-item', isSequence: async () => true, getSequence: async () => nested };
+  const nestedItem = h.views.register({ isSequence: async () => true, getSequence: async () => nested }, 'nested-item');
   h.project.getSequences = async () => [];
-  h.root.getItems = async () => [nestedItem];
+  h.root.getItems = async () => [h.views.base(nestedItem)];
   const result = await Host.snapshot(h.project, h.ppro, normalize, async () => {});
   assert.equal(result.complete, true);
   assert.equal(result.paths.has(normalize(target)), true);

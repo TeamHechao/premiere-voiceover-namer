@@ -41,7 +41,8 @@ test('name repair claims are reset at monitor and sequence boundaries and after 
   assert.match(primaryBody, /primaryAction === "refresh"[\s\S]*?normalizedNameChecks\.clear\(\)/);
   assert.match(refreshBody, /normalizedNameChecks\.clear\(\)/);
   assert.match(refreshBody, /if \(monitoring\)[\s\S]*?requestSoonScan\(\)/);
-  assert.match(mainSource, /refreshButton\.textContent\s*=\s*monitoring \? "重新检查" : "刷新项目"/);
+  assert.match(mainSource, /refreshButton\.title\s*=\s*monitoring \? "重新检查" : "刷新项目"/);
+  assert.match(mainSource, /refreshButton\.setAttribute\("aria-label", refreshButton\.title\)/);
   assert.match(mainSource, /refreshButton\.disabled\s*=\s*view\.busy \|\| \(monitoring && !panelErrorMessage\)/);
 });
 
