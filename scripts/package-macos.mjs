@@ -65,7 +65,8 @@ const guide = `# 赫朝录音命名器 macOS 侧载包
 
 插件在录音停止、Premiere 生成 WAV 后等待文件稳定，再把它移入与当前 \`.prproj\` 同级的 \`Adobe Premiere Pro Captured and Generated\` 文件夹，命名为“项目名-32位UUID.wav”，并同步 Premiere 素材名、媒体路径和时间线片段名。跨卷时会排他复制并分块核对 SHA-256，链接成功后才清理原始采集文件；任何不确定情况都会保留源文件并提示。它不会在每条录音后保存整个 \`.prproj\`。旧版创建的“录音”文件夹不会被自动移动或删除。macOS 外置卷权限、跨卷复制、真实录音、重链接和长时间连续录音仍需按项目验收清单验证。
 `;
-await writeFile(path.join(packageDirectory, "使用说明.md"), guide, "utf8");
+const mediaGuide = await readFile(path.join(projectRoot, "docs/同名素材整理.md"), "utf8");
+await writeFile(path.join(packageDirectory, "使用说明.md"), guide + "\n\n" + mediaGuide, "utf8");
 
 async function filesUnder(root, current = root) {
   const entries = await readdir(current, { withFileTypes: true });

@@ -127,7 +127,6 @@ export function previewBootstrap(requestedState, requestedStage) {
         node("panelMain").setAttribute("aria-busy", view.busy ? "true" : "false");
         node("monitorStatus").className = "monitor-status monitor-status--" + view.tone;
         text("monitorStatusText", view.statusLabel);
-        text("stateKicker", view.kicker);
         text("stateTitle", view.title);
         text("stateDescription", view.description);
 
@@ -141,37 +140,33 @@ export function previewBootstrap(requestedState, requestedStage) {
         });
         node("readinessFolder").setAttribute("data-ready", scenario.folderPath ? "true" : "false");
 
-        var guideSteps = [
-          ["guideProject", scenario.input.monitoring === true],
-          ["guideFolder", scenario.job != null],
-          ["guideListen", scenario.job && scenario.job.stage === "complete"],
-        ];
-        guideSteps.forEach(function (entry, index) {
-          var guideNode = node(entry[0]);
-          var completed = entry[1] === true;
-          var active = !completed && (
-            (index === 0 && scenario.input.monitoring !== true) ||
-            (index === 1 && scenario.input.monitoring === true) ||
-            (index === 2 && scenario.job != null)
-          );
-          guideNode.setAttribute("data-guide-status", completed ? "done" : active ? "active" : "waiting");
-          guideNode.querySelector(".guide-marker").textContent = completed ? "✓" : String(index + 1);
-        });
-        var guideStatus = "正在连接 Premiere";
-        if (view.mode === "ready" || view.mode === "starting") guideStatus = "正在自动布防";
-        if (view.mode === "listening") guideStatus = "直接点音轨麦克风";
-        if (view.mode === "paused") guideStatus = "恢复后继续自动处理";
-        if (["processing", "scanning"].indexOf(view.mode) >= 0) guideStatus = "录音已捕获，正在自动处理";
-        if (view.mode === "error") guideStatus = "看顶部提示后重新检查";
-        text("guideStatus", guideStatus);
-
         var projectValue = scenario.projectName;
         if (scenario.state === "unsaved") projectValue += " · 尚未保存";
         var folderValue = scenario.folderPath || "保存工程后自动确定";
         text("projectName", projectValue);
         text("watchFolder", folderValue);
         text("sequenceName", scenario.sequenceName);
-        text("readinessCount", view.readiness.completed === 2 ? "自动待命" : view.readiness.completed + "/2 已完成");
+        text("readinessCount", view.readiness.completed === 2 ? projectValue : view.readiness.completed + "/2 已完成");
+
+        function disclosure(id, open) {
+          var button = node(id);
+          node(button.getAttribute("aria-controls")).hidden = !open;
+          button.setAttribute("aria-expanded", open ? "true" : "false");
+        }
+        ["recordingDetailsButton", "connectionDetailsButton"].forEach(function (id) {
+          node(id).addEventListener("click", function () {
+            disclosure(id, node(id).getAttribute("aria-expanded") !== "true");
+          });
+        });
+        if (["disconnected", "unsaved", "no-sequence"].indexOf(view.mode) >= 0) disclosure("connectionDetailsButton", true);
+        if (view.mode === "error") disclosure("recordingDetailsButton", true);
+        node("clearLogButton").addEventListener("click", function () {
+          node("activityLog").textContent = "";
+          var empty = document.createElement("li");
+          empty.className = "activity-empty";
+          empty.textContent = "暂无记录";
+          node("activityLog").appendChild(empty);
+        });
 
         var start = node("startButton");
         var stop = node("stopButton");
@@ -181,11 +176,14 @@ export function previewBootstrap(requestedState, requestedStage) {
         disabled("startButton", view.busy || !view.primaryAction);
         disabled("stopButton", scenario.input.monitoring !== true);
         disabled("scanButton", view.busy || view.readiness.completed !== 2);
+        disabled("mediaButton", view.busy || scenario.input.hasProject !== true || scenario.input.projectSaved !== true);
         disabled(
           "chooseFolderButton",
           scenario.input.monitoring === true || view.busy || scenario.input.hasProject !== true || scenario.input.projectSaved !== true
         );
-        disabled("refreshButton", scenario.input.monitoring === true || view.busy);
+        disabled("refreshButton", view.busy || (scenario.input.monitoring === true && !scenario.input.errorMessage));
+        node("refreshButton").title = scenario.input.monitoring === true ? "重新检查" : "刷新项目";
+        node("refreshButton").setAttribute("aria-label", node("refreshButton").title);
 
         var pipelineIds = ["pipelineFound", "pipelineStable", "pipelineRename", "pipelineRelink"];
         var statusLabels = { waiting: "等待", active: "正在进行", done: "已完成", error: "失败", skipped: "已跳过" };
@@ -225,6 +223,49 @@ export function previewBootstrap(requestedState, requestedStage) {
         text("processedCount", scenario.metrics.processed);
         text("pendingCount", scenario.metrics.pending);
         text("errorCount", scenario.metrics.errors);
+
+        if (["listening", "processing", "paused", "error"].indexOf(scenario.state) >= 0) {
+          node("activityLog").textContent = "";
+          for (var logIndex = 0; logIndex < 20; logIndex += 1) {
+            var logRow = document.createElement("li");
+            logRow.className = "activity-item activity-item--ok";
+            var logTime = document.createElement("span");
+            logTime.className = "activity-time";
+            logTime.textContent = "14:30:12";
+            logRow.appendChild(logTime);
+            logRow.appendChild(document.createTextNode("已完成：318最终版-7f3c9a2e4b1d48f0a6c1e8d2b9f04a77.wav"));
+            node("activityLog").appendChild(logRow);
+          }
+        }
+
+        ["media", "scan"].forEach(function (kind) {
+          var dialog = node(kind + "Dialog");
+          node(kind + "Button").addEventListener("click", function () {
+            text(kind + "DialogCount", "1 组同名 · 可改 8 个文件 · 跳过 0 个");
+            if (kind === "media") text("mediaScope", "已检查项目面板 3 个素材箱中的 168 个文件，跳过 7 个序列、6 个非媒体条目。");
+            var list = node(kind === "media" ? "mediaPreview" : "scanPreview");
+            list.textContent = "";
+            for (var index = 0; index < 8; index += 1) {
+              var row = document.createElement("div");
+              row.className = "preview-row";
+              var source = document.createElement("div");
+              source.className = "preview-source";
+              source.textContent = "示例素材/片头/S00" + (index + 1) + "/彩色片段.mp4";
+              var target = document.createElement("div");
+              target.className = "preview-target";
+              target.textContent = "彩色片段-素材_7f3c9a2e4b1d48f0a6c1e8d2b9f04a77.mp4";
+              row.appendChild(source); row.appendChild(target); list.appendChild(row);
+            }
+            var confirm = node("confirm" + (kind === "media" ? "Media" : "Scan") + "Button");
+            confirm.hidden = false;
+            confirm.disabled = true;
+            confirm.textContent = "确认改名 8 个文件";
+            dialog.showModal();
+          });
+          ["cancel", "close"].forEach(function (action) {
+            node(action + (kind === "media" ? "Media" : "Scan") + "Button").addEventListener("click", function () { dialog.close(); });
+          });
+        });
       })();
     </script>`;
 }

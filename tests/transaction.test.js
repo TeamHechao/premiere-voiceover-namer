@@ -4,6 +4,21 @@ const assert = require('node:assert/strict');
 const sha256 = require('../src/sha256.js');
 const transaction = require('../src/transaction.js');
 
+test('shared relink refreshes with override and waits for an explicitly online matching path', async () => {
+  const events = [];
+  let current = 'old.mp4', reads = 0;
+  const item = {
+    async getMediaFilePath() { return current; },
+    async changeMediaFilePath(value, override) { events.push(['link', value, override]); current = value; return true; },
+    async refreshMedia() { events.push(['refresh']); },
+    async isOffline() { reads += 1; return reads < 3 ? undefined : false; },
+  };
+  await transaction.relinkMedia({ projectItem: item, targetPath: 'new.mp4', samePath: (a, b) => a === b,
+    delay: async () => { events.push(['wait']); },
+  });
+  assert.deepEqual(events, [['link', 'new.mp4', true], ['refresh'], ['wait'], ['wait']]);
+});
+
 function makeFs(initialPaths, options = {}) {
   const files = new Set(initialPaths);
   const contents = new Map(initialPaths.map((nativePath, index) => [

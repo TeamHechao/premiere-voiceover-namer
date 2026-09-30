@@ -299,7 +299,7 @@
   async function verifyLink(projectItem, expectedPath, samePath) {
     var actualPath = await projectItem.getMediaFilePath();
     var offline = await projectItem.isOffline();
-    return !offline && samePath(actualPath, expectedPath);
+    return offline === false && samePath(actualPath, expectedPath);
   }
 
   async function waitForVerifiedLink(projectItem, expectedPath, samePath, delay) {
@@ -312,15 +312,31 @@
     return false;
   }
 
+  // Recording recovery and manual media naming share the same host operation:
+  // override the stale path check, refresh, then read back both path and online
+  // state. This changes only this ProjectItem, never rewrites a .prproj file.
+  async function relinkMedia(options) {
+    var item = options.projectItem;
+    var delay = options.delay || wait;
+    if (options.forceChange || !options.samePath(await item.getMediaFilePath(), options.targetPath) || await item.isOffline() !== false) {
+      var changed = await item.changeMediaFilePath(options.targetPath, true);
+      if (!changed) throw new Error("Premiere 重链接返回失败");
+      if (options.onPathChanged) options.onPathChanged();
+    }
+    await validateContext(options.validate);
+    await item.refreshMedia();
+    if (!(await waitForVerifiedLink(item, options.targetPath, options.samePath, delay))) {
+      throw new Error("重链接后素材仍离线或路径不一致");
+    }
+  }
+
   async function recoverLink(context, recoveryPath) {
     for (var attempt = 0; attempt < 3; attempt += 1) {
       if (await waitForVerifiedLink(context.projectItem, recoveryPath, context.samePath, context.delay)) return true;
       try {
-        var relinked = await context.projectItem.changeMediaFilePath(recoveryPath, true);
-        if (relinked) {
-          await context.projectItem.refreshMedia();
-          if (await waitForVerifiedLink(context.projectItem, recoveryPath, context.samePath, context.delay)) return true;
-        }
+        await relinkMedia({ projectItem: context.projectItem, targetPath: recoveryPath,
+          samePath: context.samePath, delay: context.delay, forceChange: true });
+        return true;
       } catch (error) {}
       if (attempt < 2) await context.delay(150);
     }
@@ -985,15 +1001,9 @@
 
       await validateContext(options.validate);
       notifyStage(options.onStage, "relink");
-      var relinked = await projectItem.changeMediaFilePath(targetPath, true);
-      if (!relinked) throw new Error("Premiere 重链接返回失败");
-      context.linkChanged = true;
-
-      await validateContext(options.validate);
-      await projectItem.refreshMedia();
-      if (!(await waitForVerifiedLink(projectItem, targetPath, samePath, delay))) {
-        throw new Error("重链接后素材仍离线或路径不一致");
-      }
+      await relinkMedia({ projectItem: projectItem, targetPath: targetPath, samePath: samePath,
+        delay: delay, validate: options.validate, forceChange: true,
+        onPathChanged: function () { context.linkChanged = true; } });
 
       await validateContext(options.validate);
       var targetTrackItemNames = context.trackItemNames.map(function (entry) {
@@ -1038,6 +1048,8 @@
   return {
     exists: exists,
     hashFile: hashFile,
+    relinkMedia: relinkMedia,
+    verifyMediaLink: waitForVerifiedLink,
     isTargetConflict: isTargetConflict,
     renameAndRelink: renameAndRelink,
     synchronizeNames: synchronizeNames,

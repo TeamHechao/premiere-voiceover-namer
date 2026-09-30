@@ -54,21 +54,17 @@ test('panel preview presents the project-level globally unique recording ID form
   assert.doesNotMatch(html, /318最终版-000003/);
 });
 
-test('panel preview explains the native microphone zero-setup route', async () => {
+test('compact panel keeps common commands and puts full connection values behind an accessible disclosure', async () => {
   const html = await preview.renderIndex('ready', 'rename');
-  assert.match(html, /怎么用/);
-  assert.match(html, /面板自动待命/);
-  assert.match(html, /不选目录，也不用点开始监听/);
-  assert.match(html, /时间线音轨麦克风/);
-  assert.match(html, /画外音录制/);
-  assert.match(html, /唯一文件名/);
-  assert.match(html, /自动重链接/);
+  assert.match(html, /扫描遗漏录音/);
+  assert.match(html, /整理同名素材/);
   assert.match(html, /最终保存位置/);
-  assert.match(html, /\.prproj 同级的 Adobe Premiere Pro Captured and Generated 文件夹/);
   assert.match(html, /只用于发现 Premiere 原始录音，不会改变最终保存位置/);
-  assert.match(html, /id="guideProject"/);
-  assert.match(html, /id="guideFolder"/);
-  assert.match(html, /id="guideListen"/);
+  assert.match(html, /aria-controls="connectionDetails" aria-expanded="false"/);
+  assert.match(html, /id="connectionDetails"[^>]* hidden/);
+  assert.match(html, /id="projectName"/);
+  assert.match(html, /id="sequenceName"/);
+  assert.doesNotMatch(html, /guide-steps|guide-route|stateKicker/);
 });
 
 test('panel preview never presents the capture source as the final save location', async () => {
@@ -78,17 +74,17 @@ test('panel preview never presents the capture source as the final save location
   assert.match(html, /正在移入工程媒体目录并命名/);
 });
 
-test('panel puts the real processing result before secondary guidance and connection details', async () => {
+test('panel puts processing details before connection details and retains the complete filename', async () => {
   const html = await preview.renderIndex('processing', 'relink');
   const stateIndex = html.indexOf('class="state-band"');
   const pipelineIndex = html.indexOf('class="pipeline-band"');
-  const guideIndex = html.indexOf('class="guide-band"');
   const readinessIndex = html.indexOf('class="readiness-band"');
 
   assert.ok(stateIndex >= 0);
   assert.ok(pipelineIndex > stateIndex);
-  assert.ok(guideIndex > pipelineIndex);
-  assert.ok(readinessIndex > guideIndex);
+  assert.ok(readinessIndex > pipelineIndex);
+  assert.match(html, /aria-controls="recordingDetails" aria-expanded="false"/);
+  assert.match(html, /id="recordingDetails"[^>]* hidden/);
   assert.match(html, /链接并改片段/);
 });
 
@@ -112,22 +108,16 @@ test('panel sections stay in document flow instead of shrinking into each other'
   assert.doesNotMatch(shellRule[1], /display:\s*flex|flex-direction|flex-shrink/);
 });
 
-test('active panel states collapse repeated guidance and readiness details', () => {
-  for (const state of ['ready', 'starting', 'listening', 'processing', 'scanning']) {
-    assert.match(panelStyles, new RegExp(`\\.app-shell\\[data-panel-state="${state}"\\] \\.guide-steps`));
-    assert.match(panelStyles, new RegExp(`\\.app-shell\\[data-panel-state="${state}"\\] \\.readiness-list`));
-  }
-
-  for (const state of ['disconnected', 'unsaved', 'no-sequence', 'paused', 'error']) {
-    assert.doesNotMatch(panelStyles, new RegExp(`\\.app-shell\\[data-panel-state="${state}"\\] \\.guide-steps`));
-    assert.doesNotMatch(panelStyles, new RegExp(`\\.app-shell\\[data-panel-state="${state}"\\] \\.readiness-list`));
-  }
+test('manual disclosure remains available in every state instead of CSS forcing details closed', () => {
+  assert.match(panelStyles, /\[hidden\]\s*\{[^}]*display:\s*none !important/);
+  assert.doesNotMatch(panelStyles, /data-panel-state[^\n]*\.readiness-list/);
+  assert.match(panelMainSource, /view\.mode !== previousMode/);
+  assert.match(panelMainSource, /"recordingDetailsButton", onDisclosureClick/);
+  assert.match(panelMainSource, /"connectionDetailsButton", onDisclosureClick/);
 });
 
-test('activity history uses the panel scrollport instead of a nested scrollbar', () => {
-  assert.match(panelStyles, /\.activity-list\s*\{[^}]*overflow:\s*visible;/s);
-  assert.doesNotMatch(panelStyles, /\.activity-list\s*\{[^}]*overflow-y:\s*auto;/s);
-  assert.doesNotMatch(panelStyles, /\.activity-list\s*\{[^}]*max-height:/s);
+test('activity history stays bounded so logs cannot push the commands away', () => {
+  assert.match(panelStyles, /\.activity-list\s*\{[^}]*max-height:\s*168px;[^}]*overflow-y:\s*auto;/s);
   assert.match(panelMainSource, /var LOG_LIMIT = 20;/);
 });
 
